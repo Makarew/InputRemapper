@@ -1,0 +1,31 @@
+﻿Action ID
+0 1 - Up Arrow-
+1 1 - Down Arrow-
+2 0 - Left Arrow-
+3 0 - Right Arrow-
+4 3 - W-
+5 3 - S-
+6 2 - A-
+7 2 - D-
+8 5 - G-
+9 5 - B-
+10 4 - V-
+11 4 - N-
+12 6 - Space-
+13 7 - Z-
+14 8 - X-
+15 9 - C-
+16 10 - Q-
+17 11 - E-
+18 12 - Left Shift-
+19 13 - Right Shift-
+20 14 - Return-
+21 15 - Backspace-
+
+
+RInput.P.controllers.keyboardMapSet[0]
+.ClearElementMaps()
+.CreateElementMap(int actionId, Pole axisContribution, Keycode, null, null, null, null)
+
+TitleScreen
+Canvas - title_screen - SaveSelect - WindowBG - HeaderText.Text
