@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using MelonLoader;
@@ -9,6 +10,13 @@ namespace InputRemapper
 {
     internal class ReadSettings
     {
+        internal struct InputMaps
+        {
+            public int actionID;
+            public bool negative;
+            public KeyCode keyCode;
+        }
+
         internal static void UpdateInputsFromSettings()
         {
             try
@@ -23,9 +31,18 @@ namespace InputRemapper
 
                 // Get The Map
                 KeyboardMap map = (KeyboardMap)p.controllers.maps.GetMap(0);
+                MouseMap mouseMap = (MouseMap)p.controllers.maps.GetMap(p.controllers.Mouse, 0, 0);
 
                 // Remove All Mappings From The Map
                 map.ClearElementMaps();
+                mouseMap.ClearElementMaps();
+
+                // Disable Mouse In Plugin
+                Melon<Plugin>.Instance.usingMouse = false;
+
+                // Reset Camera Sensitivity
+                Melon<Plugin>.Instance.sensitivity.x = 90;
+                Melon<Plugin>.Instance.sensitivity.y = 90;
 
                 // Read The Settings File
                 StreamReader r = new StreamReader(Path.Combine(MelonHandler.ModsDirectory, "P06ML/Mods/Plugins/Input Remapper/Settings.ini"));
@@ -75,12 +92,45 @@ namespace InputRemapper
                                     pole = Rewired.Pole.Negative;
                                     break;
                             }
-                            
-                            // Get The KeyCode From The Settings File For The Current Line
-                            KeyCode keyCode = GetKeyCode(lineData[1]);
 
-                            // Add The Input Mapping
-                            Melon<Plugin>.Instance.UpdateInputs(actionID, pole, keyCode, map);
+                            // Check If The Line Is For Mouse Or Keyboard Controls
+                            if (lineData[1].StartsWith("Mouse") || lineData[1].StartsWith("Wheel"))
+                            {
+                                // Get Mouse Element Map For The Current Line
+                                MouseElementMap mMap = GetMouseElementMap(lineData[1]);
+
+                                // Add The Input Mapping
+                                Melon<Plugin>.Instance.UpdateInputs(actionID, mMap.axisContribution, mMap.elementID, mMap.elementType, mMap.axisRange, mMap.invert, mouseMap);
+
+                                // Let Plugin Know That The Mouse Is Being Used
+                                Melon<Plugin>.Instance.usingMouse = true;
+                            } else
+                            {
+                                KeyCode keyCode = KeyCode.None;
+
+                                float f = 0;
+                                // Check If The Line Key Is A Number Value - Numbers Should Only Be On Sensitivity
+                                if (float.TryParse(lineData[1], out f))
+                                {
+                                    // Set Sensitivity X/Y To The Line Key
+                                    if (actionID == -10)
+                                    {
+                                        Melon<Plugin>.Instance.sensitivity.x = f;
+                                    }
+                                    if (actionID == -11)
+                                    {
+                                        Melon<Plugin>.Instance.sensitivity.y = f;
+                                    }
+                                }
+                                else
+                                {
+                                    // Get The KeyCode From The Settings File For The Current Line
+                                    keyCode = GetKeyCode(lineData[1]);
+
+                                    // Add The Input Mapping
+                                    Melon<Plugin>.Instance.UpdateInputs(actionID, pole, keyCode, map);
+                                }
+                            }
                         }
                     }
                     while (line != null);
@@ -89,6 +139,111 @@ namespace InputRemapper
                 }
             }
             catch { MelonLogger.Error("Couldn't Read Input Settings"); }
+        }
+
+        internal static InputMaps[] GetFromSettings()
+        {
+            List<InputMaps> maps = new List<InputMaps>();
+
+            try
+            {
+                // Get The RInput Object
+                Type t = typeof(RInput);
+                RInput rin = GameObject.FindObjectOfType<RInput>();
+
+                // Get The Player Field
+                FieldInfo field = t.GetField("P", BindingFlags.NonPublic | BindingFlags.Instance);
+                Player p = (Player)field.GetValue(rin);
+
+                // Get The Map
+                KeyboardMap map = (KeyboardMap)p.controllers.maps.GetMap(0);
+
+                // Remove All Mappings From The Map
+                map.ClearElementMaps();
+
+                // Read The Settings File
+                StreamReader r = new StreamReader(Path.Combine(MelonHandler.ModsDirectory, "P06ML/Mods/Plugins/Input Remapper/Settings.ini"));
+
+                string line;
+                using (r)
+                {
+                    do
+                    {
+                        //Read a line
+                        line = r.ReadLine();
+                        if (line != null)
+                        {
+                            //Divide line into basic structure
+                            string[] lineData = line.Split(';');
+
+                            // Get The ActionID From The Settings File For The Current Line
+                            int actionID = GetActionID(lineData[0]);
+
+                            bool isNeg = false;
+
+                            // Set Certain Actions To A Negative Pole And Switch To The Correct ActionID
+                            switch (actionID)
+                            {
+                                case -2:
+                                    actionID = 1;
+                                    isNeg = true;
+                                    break;
+                                case -3:
+                                    actionID = 0;
+                                    isNeg = true;
+                                    break;
+                                case -4:
+                                    actionID = 3;
+                                    isNeg = true;
+                                    break;
+                                case -5:
+                                    actionID = 2;
+                                    isNeg = true;
+                                    break;
+                                case -6:
+                                    actionID = 5;
+                                    isNeg = true;
+                                    break;
+                                case -7:
+                                    actionID = 4;
+                                    isNeg = true;
+                                    break;
+                            }
+
+                            KeyCode keyCode = KeyCode.None;
+
+                            float f = 0;
+                            // Check If The Line Key Is A Number Value - Numbers Should Only Be On Sensitivity
+                            if (float.TryParse(lineData[1], out f))
+                            {
+                                // Do Nothing - Section Needs Rewrite To Include Reporting Sensitivity
+                            }
+                            else
+                            {
+                                // Get The KeyCode From The Settings File For The Current Line
+                                keyCode = GetKeyCode(lineData[1]);
+                            }
+
+                            // Store Data About The Input Map
+                            InputMaps imap = new InputMaps();
+                            imap.actionID = actionID;
+                            imap.negative = isNeg;
+                            imap.keyCode = keyCode;
+
+                            maps.Add(imap);
+                        }
+                    }
+                    while (line != null);
+                    //Stop reading the file
+                    r.Close();
+
+                    UpdateInputsFromSettings();
+                }
+            }
+            catch { MelonLogger.Error("Couldn't Read Input Settings"); }
+
+            // Return The Stored Input Map Data
+            return maps.ToArray();
         }
 
         // Get An Int For The ActionID Based On A String
@@ -164,6 +319,13 @@ namespace InputRemapper
                 case "RT":
                     result = 13;
                     break;
+
+                case "SensitivityX":
+                    result = -10;
+                    break;
+                case "SensitivityY":
+                    result = -11;
+                    break;
             }
 
             return result;
@@ -232,8 +394,8 @@ namespace InputRemapper
                 case "Space":
                     result = KeyCode.Space; break;
 
-                case "Tilde":
-                    result = KeyCode.Tilde; break;
+                case "BackQuote":
+                    result = KeyCode.BackQuote; break;
                 case "Tab":
                     result = KeyCode.Tab; break;
                 case "LeftShift":
@@ -382,6 +544,70 @@ namespace InputRemapper
             }
 
             return result;
+        }
+
+        // Stores Mouse Input Map Data
+        internal struct MouseElementMap
+        {
+            public Rewired.Pole axisContribution;
+            public int elementID;
+            public ControllerElementType elementType;
+            public AxisRange axisRange;
+            public bool invert;
+        }
+
+        // Get The Mouse Input Map Data
+        private static MouseElementMap GetMouseElementMap(string mouseCode) 
+        { 
+            MouseElementMap mMap = new MouseElementMap();
+
+            switch (mouseCode)
+            {
+                case "MouseX":
+                    mMap.axisContribution = Rewired.Pole.Positive;
+                    mMap.elementID = 0;
+                    mMap.elementType = ControllerElementType.Axis;
+                    mMap.axisRange = AxisRange.Full;
+                    mMap.invert = true;
+                    break;
+                case "MouseY":
+                    mMap.axisContribution = Rewired.Pole.Positive;
+                    mMap.elementID = 1;
+                    mMap.elementType = ControllerElementType.Axis;
+                    mMap.axisRange = AxisRange.Full;
+                    mMap.invert = true;
+                    break;
+                case "MouseLeft":
+                    mMap.axisContribution = Rewired.Pole.Positive;
+                    mMap.elementID = 3;
+                    mMap.elementType = ControllerElementType.Button;
+                    mMap.axisRange = AxisRange.Positive;
+                    mMap.invert = false;
+                    break;
+                case "MouseRight":
+                    mMap.axisContribution = Rewired.Pole.Positive;
+                    mMap.elementID = 4;
+                    mMap.elementType = ControllerElementType.Button;
+                    mMap.axisRange = AxisRange.Positive;
+                    mMap.invert = false;
+                    break;
+                case "WheelUp":
+                    mMap.axisContribution = Rewired.Pole.Positive;
+                    mMap.elementID = 2;
+                    mMap.elementType = ControllerElementType.Axis;
+                    mMap.axisRange = AxisRange.Positive;
+                    mMap.invert = false;
+                    break;
+                case "WheelDown":
+                    mMap.axisContribution = Rewired.Pole.Negative;
+                    mMap.elementID = 2;
+                    mMap.elementType = ControllerElementType.Axis;
+                    mMap.axisRange = AxisRange.Negative;
+                    mMap.invert = false;
+                    break;
+            }
+
+            return mMap;
         }
     }
 }

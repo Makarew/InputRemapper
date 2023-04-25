@@ -4,6 +4,7 @@ using UnityEngine;
 using System.Reflection;
 using System;
 using UnityEngine.UI;
+using HarmonyLib;
 
 namespace InputRemapper
 {
@@ -14,20 +15,53 @@ namespace InputRemapper
 
         // UI Handler
         private InputRemapperGUI irGUI;
-        
+
+        internal ReadSettings.InputMaps[] maps;
+
+        public Vector2 sensitivity = new Vector2(90, 90);
+        internal Vector2 trailerRot = new Vector2();
+
+        private bool GetSettings;
+
+        internal bool usingMouse;
+        private bool madeMouse;
+
+        public static new HarmonyLib.Harmony Harmony { get; private set; }
+
         public override void OnSceneWasLoaded(int buildIndex, string sceneName)
         {
             base.OnSceneWasLoaded(buildIndex, sceneName);
 
             // Create The UI Handler On The Title Screen If It Doesn't Exist
-            if (sceneName == "TitleScreen" && irGUI == null)
+            if (sceneName == "TitleScreen")
             {
-                irGUI = GameObject.Instantiate(new GameObject()).AddComponent<InputRemapperGUI>();
-                GameObject.DontDestroyOnLoad(irGUI);
+                if (irGUI == null)
+                {
+                    irGUI = GameObject.Instantiate(new GameObject()).AddComponent<InputRemapperGUI>();
+                    GameObject.DontDestroyOnLoad(irGUI);
 
-                // Give The UI Handler A Font And Color
-                irGUI.style.font = GameObject.Find("Canvas/title_screen/SaveSelect/WindowBG/HeaderText").GetComponent<Text>().font;
-                irGUI.style.normal.textColor = Color.white;
+                    // Give The UI Handler A Font And Color
+                    irGUI.style.font = GameObject.Find("Canvas/title_screen/SaveSelect/WindowBG/HeaderText").GetComponent<Text>().font;
+                    irGUI.style.normal.textColor = Color.white;
+                }
+
+                // Get The RInput Object
+                Type t = typeof(RInput);
+                RInput rin = GameObject.FindObjectOfType<RInput>();
+
+                // Get The Player Field
+                FieldInfo field = t.GetField("P", BindingFlags.NonPublic | BindingFlags.Instance);
+                Player p = (Player)field.GetValue(rin);
+
+                // Add Mouse Controller And Map
+                if (!madeMouse)
+                {
+                    p.controllers.AddController(ControllerType.Mouse, 0, false);
+                    p.controllers.maps.AddMap(p.controllers.Mouse, new MouseMap(), true);
+                }
+
+                // Load Input Settings Next Frame
+                GetSettings = true;
             }
 
             // For Testing - Shouldn't Run By Default
@@ -61,6 +95,11 @@ namespace InputRemapper
                 irGUI.style.font = GameObject.Find("Select Stage Menu UI/Menu Holder/Global-Canvas/Plugins Menu Selector/Stage Preview/Options/Title Text").GetComponent<Text>().font;
                 irGUI.style.normal.textColor = Color.white;
             }
+
+            // Patch The Camera To Use Sensitivity
+            Harmony = new HarmonyLib.Harmony("InputRemapper");
+
+            CameraPatches.Initialize();
         }
 
         public override void OnUpdate()
@@ -70,15 +109,41 @@ namespace InputRemapper
             // Don't Run If The UI Handler Doesn't Exist
             if (irGUI == null) return;
 
-            // Wait For The Player To Press Right Control
-            if (Input.GetKeyDown(KeyCode.RightControl))
+            // Wait A Frame After Loading Title Screen To Update Input Maps
+            // Prevents Remapper From Trying To Use The Mouse Map Before It Finishes Initializing
+            if (GetSettings)
             {
                 // Read The Settings File And Apply The Input Mapping
-                ReadSettings.UpdateInputsFromSettings();
+                maps = ReadSettings.GetFromSettings();
 
                 // Turn On The UI Handler With A Four Second Timer
                 irGUI.guiTimer = 4;
                 irGUI.useGUI = true;
+
+                // Set To False To Prevent Map Updates Every Frame
+                GetSettings = false;
+            }
+
+            // Wait For The Player To Press Right Control
+            if (Input.GetKeyDown(KeyCode.RightControl))
+            {
+                // Read The Settings File And Apply The Input Mapping
+                maps = ReadSettings.GetFromSettings();
+
+                // Turn On The UI Handler With A Four Second Timer
+                irGUI.guiTimer = 4;
+                irGUI.useGUI = true;
+            }
+
+            // If Any Mouse Controls Are Used, Lock The Cursor To The Center Of The Screen While Playing
+            if (usingMouse && Singleton<GameManager>.Instance.GameState == GameManager.State.Playing && Cursor.lockState != CursorLockMode.Locked)
+            {
+                Cursor.lockState = CursorLockMode.Locked;
+            }
+            // And Free The Cursor When Not Playing
+            else if (usingMouse && Singleton<GameManager>.Instance.GameState != GameManager.State.Playing && Cursor.lockState == CursorLockMode.Locked)
+            {
+                Cursor.lockState = CursorLockMode.None;
             }
         }
 
@@ -92,6 +157,17 @@ namespace InputRemapper
                 map.CreateElementMap(actionID, pole, keycode, ModifierKey.None, ModifierKey.None, ModifierKey.None, out oneP);
 
                 setInputs = true;
+            }
+        }
+
+        // Add A Mouse Input Map
+        internal void UpdateInputs(int actionID, Rewired.Pole axisContribution, int elementID, Rewired.ControllerElementType elementType, AxisRange axisRange, bool invert, MouseMap map)
+        {
+            if (map != null)
+            {
+                ActionElementMap oneP = new ActionElementMap();
+
+                map.CreateElementMap(actionID, axisContribution, elementID, elementType, axisRange, invert, out oneP);
             }
         }
 
